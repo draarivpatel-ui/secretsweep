@@ -1,0 +1,48 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: Node ${{ matrix.node }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        node: [18, 20, 22]
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+
+      - name: Install (nothing to install)
+        run: npm install --ignore-scripts
+
+      - name: Run the test suite
+        run: npm test
+
+      - name: Verify the CommonJS artifact
+        run: npm run check:cjs
+
+      - name: CLI smoke test on a clean tree
+        run: node bin/secretsweep.mjs --version
+
+      - name: CLI smoke test with a synthetic token
+        run: |
+          set +e
+          token="ghp_$(printf 'A%.0s' $(seq 1 36))"
+          printf 'const token = "%s";\n' "$token" | node bin/secretsweep.mjs --stdin
+          status=$?
+          set -e
+          test "$status" -eq 1
