@@ -64,6 +64,28 @@ describe('baseline', () => {
     writeFileSync(path, '["one","two"]');
     assert.equal(readBaseline(path).size, 2);
   });
+  test('readBaseline rejects a null entry with a schema error', () => {
+    const path = join(tempDir(), 'null-entry.json');
+    writeFileSync(path, '[null]');
+    assert.throws(() => readBaseline(path), /invalid baseline entry/);
+  });
+  test('readBaseline rejects non-string object keys', () => {
+    const path = join(tempDir(), 'bad-key.json');
+    writeFileSync(path, '[{"key":123}]');
+    assert.throws(() => readBaseline(path), /invalid baseline entry/);
+  });
+  test('readBaseline rejects non-array entries objects', () => {
+    const path = join(tempDir(), 'bad-entries.json');
+    writeFileSync(path, '{"entries":{"key":"abc"}}');
+    assert.throws(() => readBaseline(path), /invalid baseline format/);
+  });
+  test('malicious prototype keys do not pollute objects', () => {
+    const path = join(tempDir(), 'proto.json');
+    writeFileSync(path, '{"__proto__":{"polluted":true},"entries":[{"key":"abc"}],"constructor":null}');
+    const keys = readBaseline(path);
+    assert.deepEqual([...keys], ['abc']);
+    assert.equal(({}).polluted, undefined);
+  });
   test('applyBaseline suppresses matching findings', () => {
     const f = finding('a.js', 'x', 'abc');
     const keys = new Set([baselineKey(f)]);

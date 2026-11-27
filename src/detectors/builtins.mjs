@@ -160,7 +160,7 @@ createPatternDetector({
 
 createPatternDetector({
   id: 'db-uri-password', provider: 'Database', name: 'Database URI with password', severity: high,
-  pattern: /\b([a-z][a-z0-9+.-]*):\/\/([^:\s/@]+):([^@\s/]{3,})@/gi,
+  pattern: /\b([a-z][a-z0-9+.-]{0,31}):\/\/([^:\s/@]{1,128}):([^@\s/]{3,512})@/gi,
   value: (m) => m[3],
 });
 
@@ -176,7 +176,9 @@ registerDetector({
   pattern: /-----BEGIN (?:RSA |EC |DSA |OPENSSH |ENCRYPTED )?PRIVATE KEY-----[\s\S]{1,20000}?-----END/g,
   check(text) {
     const hits = [];
-    // Each pair is (begin marker, matching end marker). Linear indexOf scans.
+    // Each pair is (begin marker, matching end marker). End positions are
+    // gathered once per marker type so a flood of unterminated BEGIN markers
+    // cannot force repeated scans of the remaining input.
     const pairs = [
       ['-----BEGIN PRIVATE KEY-----', '-----END PRIVATE KEY-----'],
       ['-----BEGIN RSA PRIVATE KEY-----', '-----END RSA PRIVATE KEY-----'],
@@ -185,24 +187,37 @@ registerDetector({
       ['-----BEGIN OPENSSH PRIVATE KEY-----', '-----END OPENSSH PRIVATE KEY-----'],
       ['-----BEGIN ENCRYPTED PRIVATE KEY-----', '-----END ENCRYPTED PRIVATE KEY-----'],
     ];
-    let cursor = 0;
-    while (cursor < text.length) {
-      let begin = -1;
-      let pair = null;
-      for (const candidate of pairs) {
-        const at = text.indexOf(candidate[0], cursor);
-        if (at !== -1 && (begin === -1 || at < begin)) {
-          begin = at;
-          pair = candidate;
-        }
+    const endPositions = pairs.map((pair) => {
+      const positions = [];
+      let at = 0;
+      while ((at = text.indexOf(pair[1], at)) !== -1) {
+        positions.push(at);
+        at += pair[1].length;
       }
-      if (begin === -1 || pair === null) break;
-      const end = text.indexOf(pair[1], begin);
-      if (end === -1) break;
+      return positions;
+    });
+    const endPointers = pairs.map(() => 0);
+    const pairByBegin = new Map(pairs.map((pair, index) => [pair[0], index]));
+    const beginPattern = /-----BEGIN (?:RSA |EC |DSA |OPENSSH |ENCRYPTED )?PRIVATE KEY-----/g;
+    let cursor = 0;
+    let match;
+    while ((match = beginPattern.exec(text)) !== null) {
+      const begin = match.index;
+      if (begin < cursor) continue;
+      const pairIndex = pairByBegin.get(match[0]);
+      const pair = pairs[pairIndex];
+      const bodyStart = begin + pair[0].length;
+      const positions = endPositions[pairIndex];
+      let pointer = endPointers[pairIndex];
+      while (pointer < positions.length && positions[pointer] < bodyStart) pointer++;
+      endPointers[pairIndex] = pointer;
+      if (pointer >= positions.length) continue;
+      const end = positions[pointer];
+      const bodyLength = end - bodyStart;
+      if (bodyLength < 1 || bodyLength > 20000) continue;
       const value = text.slice(begin, end + pair[1].length);
       hits.push({ value, index: begin });
       cursor = end + pair[1].length;
-      if (hits.length >= 100) break;
     }
     return hits;
   },
@@ -222,7 +237,6 @@ registerDetector({
       if (!value) continue;
       if (shannonEntropy(value) < 3.2) continue;
       hits.push({ value, index: match.index + match[0].indexOf(value) });
-      if (hits.length >= 1000) break;
     }
     return hits;
   },
@@ -245,7 +259,6 @@ registerDetector({
       const assigned = /(?:["'=:]|^)\s*$/.test(before) || /^["']/.test(after);
       if (!assigned) continue;
       hits.push({ value, index: match.index });
-      if (hits.length >= 1000) break;
     }
     return hits;
   },

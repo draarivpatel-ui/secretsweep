@@ -46,6 +46,9 @@ describe('detector registry', () => {
   test('missing check function is rejected', () => {
     assert.throws(() => registerDetector({ id: 'no-check' }), /no check function/);
   });
+  test('invalid severity is rejected', () => {
+    assert.throws(() => registerDetector({ id: 'bad-severity', severity: '__proto__', check: () => [] }), /invalid severity/);
+  });
   test('unsafe custom pattern is rejected', () => {
     assert.throws(() => createPatternDetector({ id: 'unsafe', pattern: /([a-z]+)+/ }), /not linear-time safe/);
   });
@@ -101,6 +104,11 @@ describe('provider detectors', () => {
     const findings = detect('aws-secret-access-key', `aws_secret_access_key = "${value}"`);
     assert.equal(findings.length, 1);
   });
+  test('aws secret assignment matching preserves the ignore-case regex flag', () => {
+    const value = R(40);
+    const findings = detect('aws-secret-access-key', `AWS_SECRET_ACCESS_KEY = "${value}"`);
+    assert.equal(findings.length, 1);
+  });
   test('database URI with password is detected', () => {
     const findings = detect('db-uri-password', 'postgres://admin:sup3rs3cr3t@db.example.internal:5432/app');
     assert.equal(findings.length, 1);
@@ -123,6 +131,15 @@ describe('provider detectors', () => {
   });
   test('PEM public key is not detected', () => {
     const pem = '-----BEGIN PUBLIC KEY-----\n' + A(64) + '\n-----END PUBLIC KEY-----';
+    assert.equal(detect('pem-private-key', pem).length, 0);
+  });
+  test('unterminated PEM header does not hide a later private key', () => {
+    const pem = '-----BEGIN RSA PRIVATE KEY-----\n' + A(64) + '\n-----END RSA PRIVATE KEY-----';
+    const text = '-----BEGIN EC PRIVATE KEY-----\nunterminated\n' + pem;
+    assert.equal(detect('pem-private-key', text).length, 1);
+  });
+  test('empty PEM body is not reported as a private key', () => {
+    const pem = '-----BEGIN RSA PRIVATE KEY----------END RSA PRIVATE KEY-----';
     assert.equal(detect('pem-private-key', pem).length, 0);
   });
   test('high entropy generic assignment is detected', () => {
@@ -158,6 +175,12 @@ describe('detector output safety', () => {
     const finding = detect('github-pat', '\n\n  ghp_' + A(36))[0];
     assert.equal(finding.line, 3);
     assert.ok(finding.column >= 3);
+  });
+  test('capture-group findings point at the secret value', () => {
+    const value = R(40);
+    const text = `aws_secret_access_key = "${value}"`;
+    const finding = detect('aws-secret-access-key', text)[0];
+    assert.equal(finding.column, text.indexOf(value) + 1);
   });
   test('multiple tokens are found in one text', () => {
     const value = 'ghp_' + A(36);

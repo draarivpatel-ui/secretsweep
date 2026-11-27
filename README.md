@@ -2,7 +2,7 @@
 
 A zero-dependency secret and PII scanner for source trees and git diffs. It ships as both a CLI and a library, emits text, JSON or SARIF 2.1.0, supports baseline suppression, and never prints a raw secret value in a report.
 
-**294 tests**. Zero runtime dependencies. Zero dev dependencies. Node.js 18 or newer.
+**354 tests**. Zero runtime dependencies. Zero dev dependencies. Node.js 18 or newer.
 
 ## Why another scanner
 
@@ -77,6 +77,12 @@ Add an inline comment to suppress a single line:
 const token = process.env.API_TOKEN; // secretsweep:ignore
 ```
 
+The plain form suppresses every detector on that line. Name one or more detector ids after the marker to suppress only those detectors:
+
+```js
+const token = process.env.API_TOKEN; // secretsweep:ignore github-pat,aws-access-key-id
+```
+
 ## Library usage
 
 ```js
@@ -110,7 +116,7 @@ Placeholder values such as `EXAMPLE`, `YOUR_API_KEY` and `changeme` are ignored 
 
 ## Ignoring files
 
-secretsweep reads `.gitignore` and `.secretsweepignore` at the scan root. It always skips `.git/`, `node_modules/`, common build directories, known binary extensions and files containing NUL bytes. Symlink loops are detected and reported in the skip list.
+secretsweep reads `.gitignore` and `.secretsweepignore` at the scan root, including glob patterns, anchored patterns and negations. Ignore files larger than 1 MiB are rejected rather than loaded without a bound. It always skips `.git/`, `node_modules/`, common build directories and files whose bytes look binary, including NUL bytes and dense control characters. File extensions alone never hide otherwise readable text from the scanner. Symlink loops are detected and reported in the skip list, and symlinks resolving outside the scan root are not followed.
 
 ## Contributing
 

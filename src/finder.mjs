@@ -4,7 +4,7 @@
 import { detectors } from './detectors/index.mjs';
 import { fingerprint, maskValue, isPlaceholder } from './util.mjs';
 
-const INLINE_IGNORE = /#\s*secretsweep:ignore\b|\/\/\s*secretsweep:ignore\b|\/\*\s*secretsweep:ignore\s*\*\//;
+const INLINE_IGNORE = /(?:#|\/\/|\/\*)\s*secretsweep:ignore\b(.*)$/;
 
 // Build the newline index once per scan so line/column lookup and inline
 // suppression are O(log n) per hit instead of O(offset) per hit.
@@ -31,11 +31,24 @@ function lineStartAt(starts, index) {
 //   // secretsweep:ignore
 //   const key = 'ghp_...'
 // is deliberately NOT honoured: only a suppression on the same line applies.
-function isIgnoredLine(text, index, starts, lineIndex) {
-  const lineStart = starts[lineIndex];
-  let lineEnd = text.indexOf('\n', index);
-  if (lineEnd === -1) lineEnd = text.length;
-  return INLINE_IGNORE.test(text.slice(lineStart, lineEnd));
+function inlineSuppressions(text, starts) {
+  const suppressions = new Map();
+  for (let lineIndex = 0; lineIndex < starts.length; lineIndex++) {
+    const lineStart = starts[lineIndex];
+    let lineEnd = lineIndex + 1 < starts.length ? starts[lineIndex + 1] : text.length;
+    if (lineEnd > lineStart && text[lineEnd - 1] === '\n') lineEnd--;
+    if (lineEnd > lineStart && text[lineEnd - 1] === '\r') lineEnd--;
+    const match = INLINE_IGNORE.exec(text.slice(lineStart, lineEnd));
+    if (!match) continue;
+    let suffix = (match[1] || '').replace(/\*\/\s*$/, '').trim();
+    if (suffix.startsWith('=')) suffix = suffix.slice(1).trim();
+    if (!suffix) {
+      suppressions.set(lineIndex, true);
+    } else {
+      suppressions.set(lineIndex, new Set(suffix.split(/[\s,]+/).filter(Boolean)));
+    }
+  }
+  return suppressions;
 }
 
 export function scanText(text, options = {}) {
@@ -46,6 +59,7 @@ export function scanText(text, options = {}) {
   const allowPlaceholder = options.allowPlaceholder === true;
   const findings = [];
   const starts = lineStarts(text);
+  const suppressions = inlineSuppressions(text, starts);
 
   for (const detector of detectors) {
     if (!enabled.has(detector.id)) continue;
@@ -64,12 +78,10 @@ export function scanText(text, options = {}) {
       if (index < 0) continue;
       if (!allowPlaceholder && isPlaceholder(value)) continue;
       const lineIndex = lineStartAt(starts, index);
-      if (isIgnoredLine(text, index, starts, lineIndex)) continue;
+      const suppression = suppressions.get(lineIndex);
+      if (suppression === true || (suppression instanceof Set && suppression.has(detector.id))) continue;
       const line = lineIndex + 1;
-      let column = 1;
-      for (let i = starts[lineIndex]; i < index; i++) {
-        if (text[i] !== '\r') column++;
-      }
+      const column = index - starts[lineIndex] + 1;
       findings.push({
         detector: detector.id,
         provider: detector.provider,

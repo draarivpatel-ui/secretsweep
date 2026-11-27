@@ -39,6 +39,19 @@ describe('text output', () => {
     const f = scanText(value)[0];
     assert.ok(!formatText([f]).includes(value));
   });
+  test('short URL passwords expose at most two edge characters', () => {
+    const password = Array.from({ length: 20 }, (_, i) =>
+      'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789'[(i * 13 + 5) % 62]).join('');
+    const finding = scanText(`postgres://user:${password}@db.example.internal/app`, { detectors: ['db-uri-password'] })[0];
+    assert.ok(!formatText([finding]).includes(password));
+    assert.equal(finding.redacted.startsWith(password.slice(0, 4)), false);
+    assert.equal(finding.redacted.endsWith(password.slice(-4)), false);
+  });
+  test('control characters in file names are escaped', () => {
+    const text = formatText([finding({ file: 'a\nforged.js' })]);
+    assert.ok(!text.includes('a\nforged.js'));
+    assert.match(text, /a\\nforged\.js/);
+  });
 });
 
 describe('json output', () => {
@@ -105,6 +118,26 @@ describe('sarif output', () => {
   test('includes file URI', () => {
     const result = parse([finding()]).runs[0].results[0];
     assert.equal(result.locations[0].physicalLocation.artifactLocation.uri, 'src/a.js');
+  });
+  test('absolute host paths are reduced to a safe relative artifact name', () => {
+    const result = parse([finding({ file: '/Users/example/project/src/a.js' })]).runs[0].results[0];
+    const uri = result.locations[0].physicalLocation.artifactLocation.uri;
+    assert.equal(uri, 'a.js');
+    assert.ok(!uri.startsWith('/'));
+    assert.ok(!uri.includes('Users'));
+  });
+  test('Windows drive paths are not emitted as absolute URIs', () => {
+    const result = parse([finding({ file: 'C:/Users/example/a.js' })]).runs[0].results[0];
+    assert.equal(result.locations[0].physicalLocation.artifactLocation.uri, 'a.js');
+  });
+  test('dot segments cannot escape the artifact base', () => {
+    const result = parse([finding({ file: '../outside/a.js' })]).runs[0].results[0];
+    const uri = result.locations[0].physicalLocation.artifactLocation.uri;
+    assert.equal(uri, 'outside/a.js');
+  });
+  test('spaces in artifact URIs are percent encoded', () => {
+    const result = parse([finding({ file: 'src/path with spaces.js' })]).runs[0].results[0];
+    assert.equal(result.locations[0].physicalLocation.artifactLocation.uri, 'src/path%20with%20spaces.js');
   });
   test('includes line and column', () => {
     const region = parse([finding()]).runs[0].results[0].locations[0].physicalLocation.region;

@@ -24,7 +24,10 @@ function fingerprint(value) {
 
 function maskValue(value) {
   const text = String(value);
-  if (text.length <= 12) return '*'.repeat(text.length);
+  if (text.length <= 16) return '*'.repeat(text.length);
+  if (text.length < 32) {
+    return text.slice(0, 2) + '*'.repeat(Math.min(12, text.length - 4)) + text.slice(-2);
+  }
   return text.slice(0, 4) + '*'.repeat(Math.min(12, text.length - 8)) + text.slice(-4);
 }
 
@@ -158,12 +161,16 @@ function registerDetector(descriptor) {
   if (typeof descriptor.check !== 'function') {
     throw new Error(`detector ${id} has no check function`);
   }
+  const severity = descriptor.severity || 'high';
+  if (!['low', 'medium', 'high', 'critical'].includes(severity)) {
+    throw new Error(`detector ${id} has invalid severity`);
+  }
   if (descriptor.pattern) ensureLinear(descriptor.pattern, id);
   const entry = Object.freeze({
     id,
     provider: descriptor.provider || id,
     name: descriptor.name || descriptor.provider || id,
-    severity: descriptor.severity || 'high',
+    severity,
     pattern: descriptor.pattern || null,
     check: descriptor.check,
   });
@@ -186,7 +193,7 @@ function getDetector(id) {
 
 function createPatternDetector(descriptor) {
   const pattern = ensureLinear(descriptor.pattern, descriptor.id);
-  const flags = descriptor.flags || 'g';
+  const flags = descriptor.flags || pattern.flags || 'g';
   return registerDetector({
     ...descriptor,
     pattern,
@@ -196,9 +203,13 @@ function createPatternDetector(descriptor) {
       let match;
       while ((match = re.exec(text)) !== null) {
         const value = descriptor.value ? descriptor.value(match) : match[0];
-        if (value) matches.push({ value, index: match.index });
+        if (value) {
+          let index = match.index;
+          const valueOffset = typeof value === 'string' ? match[0].indexOf(value) : -1;
+          if (valueOffset !== -1) index += valueOffset;
+          matches.push({ value, index });
+        }
         if (match[0].length === 0) re.lastIndex++;
-        if (matches.length >= 1000) break;
       }
       return matches;
     },
@@ -374,7 +385,7 @@ createPatternDetector({
 
 createPatternDetector({
   id: 'db-uri-password', provider: 'Database', name: 'Database URI with password', severity: high,
-  pattern: /\b([a-z][a-z0-9+.-]*):\/\/([^:\s/@]+):([^@\s/]{3,})@/gi,
+  pattern: /\b([a-z][a-z0-9+.-]{0,31}):\/\/([^:\s/@]{1,128}):([^@\s/]{3,512})@/gi,
   value: (m) => m[3],
 });
 
@@ -390,7 +401,9 @@ registerDetector({
   pattern: /-----BEGIN (?:RSA |EC |DSA |OPENSSH |ENCRYPTED )?PRIVATE KEY-----[\s\S]{1,20000}?-----END/g,
   check(text) {
     const hits = [];
-    // Each pair is (begin marker, matching end marker). Linear indexOf scans.
+    // Each pair is (begin marker, matching end marker). End positions are
+    // gathered once per marker type so a flood of unterminated BEGIN markers
+    // cannot force repeated scans of the remaining input.
     const pairs = [
       ['-----BEGIN PRIVATE KEY-----', '-----END PRIVATE KEY-----'],
       ['-----BEGIN RSA PRIVATE KEY-----', '-----END RSA PRIVATE KEY-----'],
@@ -399,24 +412,37 @@ registerDetector({
       ['-----BEGIN OPENSSH PRIVATE KEY-----', '-----END OPENSSH PRIVATE KEY-----'],
       ['-----BEGIN ENCRYPTED PRIVATE KEY-----', '-----END ENCRYPTED PRIVATE KEY-----'],
     ];
-    let cursor = 0;
-    while (cursor < text.length) {
-      let begin = -1;
-      let pair = null;
-      for (const candidate of pairs) {
-        const at = text.indexOf(candidate[0], cursor);
-        if (at !== -1 && (begin === -1 || at < begin)) {
-          begin = at;
-          pair = candidate;
-        }
+    const endPositions = pairs.map((pair) => {
+      const positions = [];
+      let at = 0;
+      while ((at = text.indexOf(pair[1], at)) !== -1) {
+        positions.push(at);
+        at += pair[1].length;
       }
-      if (begin === -1 || pair === null) break;
-      const end = text.indexOf(pair[1], begin);
-      if (end === -1) break;
+      return positions;
+    });
+    const endPointers = pairs.map(() => 0);
+    const pairByBegin = new Map(pairs.map((pair, index) => [pair[0], index]));
+    const beginPattern = /-----BEGIN (?:RSA |EC |DSA |OPENSSH |ENCRYPTED )?PRIVATE KEY-----/g;
+    let cursor = 0;
+    let match;
+    while ((match = beginPattern.exec(text)) !== null) {
+      const begin = match.index;
+      if (begin < cursor) continue;
+      const pairIndex = pairByBegin.get(match[0]);
+      const pair = pairs[pairIndex];
+      const bodyStart = begin + pair[0].length;
+      const positions = endPositions[pairIndex];
+      let pointer = endPointers[pairIndex];
+      while (pointer < positions.length && positions[pointer] < bodyStart) pointer++;
+      endPointers[pairIndex] = pointer;
+      if (pointer >= positions.length) continue;
+      const end = positions[pointer];
+      const bodyLength = end - bodyStart;
+      if (bodyLength < 1 || bodyLength > 20000) continue;
       const value = text.slice(begin, end + pair[1].length);
       hits.push({ value, index: begin });
       cursor = end + pair[1].length;
-      if (hits.length >= 100) break;
     }
     return hits;
   },
@@ -436,7 +462,6 @@ registerDetector({
       if (!value) continue;
       if (shannonEntropy(value) < 3.2) continue;
       hits.push({ value, index: match.index + match[0].indexOf(value) });
-      if (hits.length >= 1000) break;
     }
     return hits;
   },
@@ -459,7 +484,6 @@ registerDetector({
       const assigned = /(?:["'=:]|^)\s*$/.test(before) || /^["']/.test(after);
       if (!assigned) continue;
       hits.push({ value, index: match.index });
-      if (hits.length >= 1000) break;
     }
     return hits;
   },
@@ -491,7 +515,7 @@ __internalDefine('src/finder.mjs', function (__exports, __internalRequire) {
 const { detectors } = __internalRequire('src/detectors/index.mjs');
 const { fingerprint, maskValue, isPlaceholder } = __internalRequire('src/util.mjs');
 
-const INLINE_IGNORE = /#\s*secretsweep:ignore\b|\/\/\s*secretsweep:ignore\b|\/\*\s*secretsweep:ignore\s*\*\//;
+const INLINE_IGNORE = /(?:#|\/\/|\/\*)\s*secretsweep:ignore\b(.*)$/;
 
 // Build the newline index once per scan so line/column lookup and inline
 // suppression are O(log n) per hit instead of O(offset) per hit.
@@ -518,11 +542,24 @@ function lineStartAt(starts, index) {
 //   // secretsweep:ignore
 //   const key = 'ghp_...'
 // is deliberately NOT honoured: only a suppression on the same line applies.
-function isIgnoredLine(text, index, starts, lineIndex) {
-  const lineStart = starts[lineIndex];
-  let lineEnd = text.indexOf('\n', index);
-  if (lineEnd === -1) lineEnd = text.length;
-  return INLINE_IGNORE.test(text.slice(lineStart, lineEnd));
+function inlineSuppressions(text, starts) {
+  const suppressions = new Map();
+  for (let lineIndex = 0; lineIndex < starts.length; lineIndex++) {
+    const lineStart = starts[lineIndex];
+    let lineEnd = lineIndex + 1 < starts.length ? starts[lineIndex + 1] : text.length;
+    if (lineEnd > lineStart && text[lineEnd - 1] === '\n') lineEnd--;
+    if (lineEnd > lineStart && text[lineEnd - 1] === '\r') lineEnd--;
+    const match = INLINE_IGNORE.exec(text.slice(lineStart, lineEnd));
+    if (!match) continue;
+    let suffix = (match[1] || '').replace(/\*\/\s*$/, '').trim();
+    if (suffix.startsWith('=')) suffix = suffix.slice(1).trim();
+    if (!suffix) {
+      suppressions.set(lineIndex, true);
+    } else {
+      suppressions.set(lineIndex, new Set(suffix.split(/[\s,]+/).filter(Boolean)));
+    }
+  }
+  return suppressions;
 }
 
 function scanText(text, options = {}) {
@@ -533,6 +570,7 @@ function scanText(text, options = {}) {
   const allowPlaceholder = options.allowPlaceholder === true;
   const findings = [];
   const starts = lineStarts(text);
+  const suppressions = inlineSuppressions(text, starts);
 
   for (const detector of detectors) {
     if (!enabled.has(detector.id)) continue;
@@ -551,12 +589,10 @@ function scanText(text, options = {}) {
       if (index < 0) continue;
       if (!allowPlaceholder && isPlaceholder(value)) continue;
       const lineIndex = lineStartAt(starts, index);
-      if (isIgnoredLine(text, index, starts, lineIndex)) continue;
+      const suppression = suppressions.get(lineIndex);
+      if (suppression === true || (suppression instanceof Set && suppression.has(detector.id))) continue;
       const line = lineIndex + 1;
-      let column = 1;
-      for (let i = starts[lineIndex]; i < index; i++) {
-        if (text[i] !== '\r') column++;
-      }
+      const column = index - starts[lineIndex] + 1;
       findings.push({
         detector: detector.id,
         provider: detector.provider,
@@ -590,7 +626,7 @@ __internalDefine('src/ignore.mjs', function (__exports, __internalRequire) {
 // small, deliberately limited matcher: no external dependencies and no
 // potentially expensive glob backtracking.
 
-const { readFileSync } = require('node:fs');
+const { readFileSync, statSync } = require('node:fs');
 const { join, relative, sep } = require('node:path');
 
 const ALWAYS_IGNORED = new Set([
@@ -598,22 +634,54 @@ const ALWAYS_IGNORED = new Set([
   '.next', '.cache', '.venv', '__pycache__', '.idea', '.vscode',
 ]);
 
+const MAX_PATTERN_CHARS = 1024;
+const MAX_IGNORE_FILE_BYTES = 1024 * 1024;
+
+function isEscaped(text, index) {
+  let count = 0;
+  for (let i = index - 1; i >= 0 && text[i] === '\\'; i--) count++;
+  return count % 2 === 1;
+}
+
+function stripUnescapedTrailingSpaces(line) {
+  let end = line.length;
+  while (end > 0 && line[end - 1] === ' ' && !isEscaped(line, end - 1)) end--;
+  return line.slice(0, end);
+}
+
 function parsePattern(line) {
-  let text = line.trim();
+  let text = stripUnescapedTrailingSpaces(line);
   if (!text || text.startsWith('#')) return null;
+
+  let literalFirst = false;
+  if (text.startsWith('\\#') || text.startsWith('\\!')) {
+    text = text.slice(1);
+    literalFirst = true;
+  }
+
   let negate = false;
-  if (text.startsWith('!')) {
+  if (!literalFirst && text.startsWith('!')) {
     negate = true;
     text = text.slice(1);
   }
+
   let dirOnly = false;
   if (text.endsWith('/')) {
     dirOnly = true;
     text = text.slice(0, -1);
   }
-  const anchored = text.startsWith('/');
-  if (anchored) text = text.slice(1);
-  return { text, negate, dirOnly, anchored };
+
+  let anchored = false;
+  if (text.startsWith('/')) {
+    anchored = true;
+    text = text.slice(1);
+  }
+  if (!text || text.length > MAX_PATTERN_CHARS) return null;
+
+  const leadingGlobstar = text.startsWith('**/');
+  const hasSlash = text.includes('/');
+  const rootAnchored = anchored || (hasSlash && !leadingGlobstar);
+  return { text, parts: text.split('/'), negate, dirOnly, anchored: rootAnchored };
 }
 
 function compileIgnoreRules(lines) {
@@ -628,30 +696,155 @@ function compileIgnoreRules(lines) {
 function loadIgnoreFiles(root, filenames = ['.gitignore', '.secretsweepignore']) {
   const lines = [];
   for (const filename of filenames) {
+    const file = join(root, filename);
+    let stats;
     try {
-      const content = readFileSync(join(root, filename), 'utf8');
+      stats = statSync(file);
+    } catch {
+      continue;
+    }
+    if (stats.size > MAX_IGNORE_FILE_BYTES) {
+      throw new Error(`ignore file ${filename} exceeds ${MAX_IGNORE_FILE_BYTES} bytes`);
+    }
+    try {
+      const content = readFileSync(file, 'utf8');
       lines.push(...content.split(/\r?\n/));
     } catch {
-      // Missing or unreadable ignore files simply contribute no rules.
+      // Unreadable ignore files simply contribute no rules.
     }
   }
   return compileIgnoreRules(lines);
 }
 
+function classChar(pattern, index) {
+  if (pattern[index] === '\\' && index + 1 < pattern.length) {
+    return { char: pattern[index + 1], next: index + 2 };
+  }
+  return { char: pattern[index], next: index + 1 };
+}
+
+function matchClass(pattern, start, char) {
+  let index = start + 1;
+  let negate = false;
+  if (pattern[index] === '!' || pattern[index] === '^') {
+    negate = true;
+    index++;
+  }
+
+  let first = true;
+  let matched = false;
+  let closed = false;
+  while (index < pattern.length) {
+    if (pattern[index] === ']' && !first) {
+      closed = true;
+      index++;
+      break;
+    }
+
+    const low = classChar(pattern, index);
+    index = low.next;
+    if (index < pattern.length && pattern[index] === '-' && index + 1 < pattern.length && pattern[index + 1] !== ']') {
+      const high = classChar(pattern, index + 1);
+      index = high.next;
+      if (char >= low.char && char <= high.char) matched = true;
+    } else if (char === low.char) {
+      matched = true;
+    }
+    first = false;
+  }
+
+  if (!closed) return { matched: char === '[', next: start + 1 };
+  return { matched: negate ? !matched : matched, next: index };
+}
+
+function matchSegment(pattern, text) {
+  if (pattern.length > MAX_PATTERN_CHARS || text.length > 4096) return false;
+  const memo = new Map();
+
+  function dp(pi, ti) {
+    const key = `${pi}:${ti}`;
+    if (memo.has(key)) return memo.get(key);
+    let result = false;
+
+    if (pi === pattern.length) {
+      result = ti === text.length;
+    } else if (pattern[pi] === '*') {
+      let next = pi;
+      while (next < pattern.length && pattern[next] === '*') next++;
+      for (let end = ti; end <= text.length; end++) {
+        if (dp(next, end)) {
+          result = true;
+          break;
+        }
+      }
+    } else if (pattern[pi] === '?') {
+      result = ti < text.length && dp(pi + 1, ti + 1);
+    } else if (pattern[pi] === '[') {
+      if (ti < text.length) {
+        const cls = matchClass(pattern, pi, text[ti]);
+        result = cls.matched && dp(cls.next, ti + 1);
+      }
+    } else {
+      let literal = pattern[pi];
+      let next = pi + 1;
+      if (literal === '\\' && pi + 1 < pattern.length) {
+        literal = pattern[pi + 1];
+        next = pi + 2;
+      }
+      result = ti < text.length && text[ti] === literal && dp(next, ti + 1);
+    }
+
+    memo.set(key, result);
+    return result;
+  }
+
+  return dp(0, 0);
+}
+
+function matchParts(patternParts, pathParts) {
+  const memo = new Map();
+
+  function dp(pi, ti) {
+    const key = `${pi}:${ti}`;
+    if (memo.has(key)) return memo.get(key);
+    let result = false;
+    if (pi === patternParts.length) {
+      result = ti === pathParts.length;
+    } else if (patternParts[pi] === '**') {
+      if (pi === patternParts.length - 1) {
+        result = ti < pathParts.length;
+      } else {
+        result = dp(pi + 1, ti) || (ti < pathParts.length && dp(pi, ti + 1));
+      }
+    } else if (ti < pathParts.length) {
+      result = matchSegment(patternParts[pi], pathParts[ti]) && dp(pi + 1, ti + 1);
+    }
+    memo.set(key, result);
+    return result;
+  }
+
+  return dp(0, 0);
+}
+
 function matchesRule(relPath, isDirectory, rule) {
-  const parts = relPath.split(/[\\/]/);
-  if (rule.anchored) {
-    if (rule.dirOnly) return isDirectory && parts[0] === rule.text;
-    return parts.includes(rule.text) && parts[0] === rule.text;
+  const parts = relPath.split(/[\\/]/).filter(Boolean);
+  if (parts.length === 0) return false;
+
+  if (!rule.anchored && rule.parts.length === 1) {
+    for (let index = 0; index < parts.length; index++) {
+      const componentIsDirectory = index < parts.length - 1 || isDirectory;
+      if (rule.dirOnly && !componentIsDirectory) continue;
+      if (matchSegment(rule.parts[0], parts[index])) return true;
+    }
+    return false;
   }
-  // A pattern without a slash matches any path segment.
-  if (!rule.text.includes('/')) {
-    if (rule.dirOnly) return isDirectory && parts.includes(rule.text);
-    return parts.includes(rule.text);
+
+  for (let end = 1; end <= parts.length; end++) {
+    const candidateIsDirectory = end < parts.length || isDirectory;
+    if (rule.dirOnly && !candidateIsDirectory) continue;
+    if (matchParts(rule.parts, parts.slice(0, end))) return true;
   }
-  // Patterns with a slash match a path prefix anchored at the scan root.
-  const normalized = rule.text.replace(/\/+$/, '');
-  return relPath === normalized || relPath.startsWith(normalized + '/');
+  return false;
 }
 
 function isIgnored(relPath, isDirectory, rules) {
@@ -681,9 +874,9 @@ __internalDefine('src/scanner.mjs', function (__exports, __internalRequire) {
 // guards symlink loops and enforces a maximum file size.
 
 const { readFileSync, readdirSync, lstatSync, realpathSync, statSync } = require('node:fs');
-const { join, resolve, extname } = require('node:path');
+const { join, resolve, extname, relative, isAbsolute, sep, basename } = require('node:path');
 const { scanText } = __internalRequire('src/finder.mjs');
-const { loadIgnoreFiles, isIgnored, isAlwaysIgnored, toRelative } = __internalRequire('src/ignore.mjs');
+const { loadIgnoreFiles, isIgnored, isAlwaysIgnored } = __internalRequire('src/ignore.mjs');
 
 const DEFAULT_MAX_FILE_BYTES = 2 * 1024 * 1024;
 const BINARY_EXTENSIONS = new Set([
@@ -692,15 +885,18 @@ const BINARY_EXTENSIONS = new Set([
   '.exe', '.dll', '.so', '.dylib', '.o', '.a', '.class', '.jar',
   '.woff', '.woff2', '.ttf', '.eot', '.otf', '.mp3', '.mp4',
   '.mov', '.avi', '.wav', '.flac', '.webm', '.sqlite', '.db',
-  '.p12', '.pfx', '.keystore', '.pyc', '.node', '.wasm',
+  '.p12', '.pfx', '.keystore', '.pyc', '.node', '.wasm', '.bin',
 ]);
 
 function looksBinary(buffer) {
-  const length = Math.min(buffer.length, 8192);
-  for (let i = 0; i < length; i++) {
-    if (buffer[i] === 0) return true;
+  if (buffer.length === 0) return false;
+  let controls = 0;
+  for (let i = 0; i < buffer.length; i++) {
+    const byte = buffer[i];
+    if (byte === 0) return true;
+    if ((byte < 9 || (byte > 13 && byte < 32) || byte === 127)) controls++;
   }
-  return false;
+  return controls / buffer.length > 0.3;
 }
 
 function isBinaryPath(path) {
@@ -712,8 +908,13 @@ function readTextFile(path, maxBytes) {
   if (!stats.isFile()) return null;
   if (stats.size > maxBytes) return null;
   const buffer = readFileSync(path);
-  if (isBinaryPath(path) || looksBinary(buffer)) return null;
+  if (looksBinary(buffer)) return null;
   return buffer.toString('utf8');
+}
+
+function insideRoot(rootReal, identity) {
+  const rel = relative(rootReal, identity);
+  return rel === '' || (rel !== '..' && !rel.startsWith(`..${sep}`) && !isAbsolute(rel));
 }
 
 function scanPath(target, options = {}) {
@@ -725,28 +926,50 @@ function scanPath(target, options = {}) {
   const visited = new Set();
   const extraRules = options.exclude || [];
 
-  function visit(path, relPath, isDirectory) {
+  let rootStat;
+  try {
+    rootStat = statSync(root);
+  } catch (error) {
+    throw new Error(`cannot read ${root}: ${error.message}`);
+  }
+  const rootIsDirectory = rootStat.isDirectory();
+  let rootReal = root;
+  try {
+    rootReal = realpathSync(root);
+  } catch {
+    rootReal = root;
+  }
+
+  function visit(path, relPath) {
     if (relPath && isAlwaysIgnored(relPath.split('/').pop())) return;
     if (extraRules.some((pattern) => relPath === pattern || relPath.startsWith(pattern + '/'))) return;
-    if (relPath && isIgnored(relPath, isDirectory, rules)) return;
 
     let stat;
-    let identity;
     try {
       stat = lstatSync(path);
-      identity = realpathSync(path);
     } catch {
-      skipped.push({ path: relPath, reason: 'broken-symlink' });
+      skipped.push({ path: relPath, reason: 'unreadable-file' });
       return;
     }
+    if (relPath && isIgnored(relPath, stat.isDirectory(), rules)) return;
+
+    let identity;
+    try {
+      identity = realpathSync(path);
+    } catch (error) {
+      skipped.push({ path: relPath, reason: error && error.code === 'ELOOP' ? 'symlink-loop' : 'broken-symlink' });
+      return;
+    }
+
     if (stat.isSymbolicLink()) {
-      if (visited.has(identity)) {
-        skipped.push({ path: relPath, reason: 'symlink-loop' });
+      if (rootIsDirectory && !insideRoot(rootReal, identity)) {
+        skipped.push({ path: relPath, reason: 'path-escape' });
         return;
       }
       try {
         stat = statSync(path);
       } catch {
+        skipped.push({ path: relPath, reason: 'broken-symlink' });
         return;
       }
     }
@@ -764,7 +987,7 @@ function scanPath(target, options = {}) {
         skipped.push({ path: relPath, reason: 'unreadable-directory' });
         return;
       }
-      entries.sort().forEach((entry) => visit(join(path, entry), relPath ? `${relPath}/${entry}` : entry, false));
+      entries.sort().forEach((entry) => visit(join(path, entry), relPath ? `${relPath}/${entry}` : entry));
       return;
     }
     if (!stat.isFile()) return;
@@ -784,51 +1007,127 @@ function scanPath(target, options = {}) {
     for (const finding of findings) results.push({ ...finding, file: relPath });
   }
 
-  let rootStat;
-  try {
-    rootStat = statSync(root);
-  } catch (error) {
-    throw new Error(`cannot read ${root}: ${error.message}`);
-  }
-  if (rootStat.isDirectory()) {
-    visit(root, '', true);
+  if (rootIsDirectory) {
+    visit(root, '');
   } else {
-    visit(root, root.split('/').pop(), false);
+    visit(root, basename(root));
   }
   return { findings: results, skipped, root };
 }
 
+function unquoteGitPath(value) {
+  if (value.length < 2 || value[0] !== '"' || value[value.length - 1] !== '"') return value;
+  let output = '';
+  for (let i = 1; i < value.length - 1; i++) {
+    const char = value[i];
+    if (char !== '\\') {
+      output += char;
+      continue;
+    }
+    if (i + 1 >= value.length - 1) {
+      output += '\\';
+      continue;
+    }
+    const next = value[++i];
+    const escapes = { n: '\n', r: '\r', t: '\t', b: '\b', a: '\x07', f: '\f', v: '\v', '\\': '\\', '"': '"' };
+    if (Object.prototype.hasOwnProperty.call(escapes, next)) {
+      output += escapes[next];
+    } else if (/[0-7]/.test(next)) {
+      let octal = next;
+      while (octal.length < 3 && i + 1 < value.length - 1 && /[0-7]/.test(value[i + 1])) {
+        octal += value[++i];
+      }
+      output += String.fromCharCode(parseInt(octal, 8));
+    } else {
+      output += next;
+    }
+  }
+  return output;
+}
+
+function parseNewFileHeader(line) {
+  if (!line.startsWith('+++ ')) return null;
+  const raw = line.slice(4).split('\t')[0];
+  const path = unquoteGitPath(raw);
+  if (path === '/dev/null') return { file: null };
+  if (path.startsWith('b/') || path.startsWith('a/')) return { file: path.slice(2) };
+  return { file: path };
+}
+
+const HUNK_HEADER = /^@@\s+-\d+(?:,\d+)?\s+\+(\d+)(?:,\d+)?\s+@@/;
+
 function scanDiff(diff, options = {}) {
   if (typeof diff !== 'string') throw new TypeError('scanDiff expects a string');
   const findings = [];
+  const lines = diff.split(/\r?\n/);
   let currentFile = '<stdin>';
+  let inHunk = false;
   let newLine = 0;
+  let blockLines = [];
+  let blockMap = [];
 
-  for (const line of diff.split(/\r?\n/)) {
-    const header = /^\+\+\+\s+[ab]\/(.+)$/.exec(line);
-    if (header) {
-      currentFile = header[1].split('\t')[0];
-      continue;
+  function flushBlock() {
+    if (blockLines.length === 0) return;
+    const text = blockLines.join('\n');
+    for (const finding of scanText(text, options)) {
+      const localLine = Math.max(1, Math.min(finding.line, blockMap.length));
+      findings.push({ ...finding, file: currentFile, line: blockMap[localLine - 1] || newLine });
     }
+    blockLines = [];
+    blockMap = [];
+  }
+
+  for (let index = 0; index < lines.length; index++) {
+    const line = lines[index];
     if (line.startsWith('diff --git ')) {
+      flushBlock();
       currentFile = '<stdin>';
+      inHunk = false;
       newLine = 0;
       continue;
     }
-    if (/^@@\s+-\d+(?:,\d+)?\s+\+(\d+)/.test(line)) {
-      newLine = Number(/^@@\s+-\d+(?:,\d+)?\s+\+(\d+)/.exec(line)[1]);
+
+    if (!inHunk) {
+      const header = parseNewFileHeader(line);
+      if (header) {
+        currentFile = header.file;
+        continue;
+      }
+      const hunk = HUNK_HEADER.exec(line);
+      if (hunk) {
+        inHunk = true;
+        newLine = Number(hunk[1]);
+      }
       continue;
     }
-    if (line.startsWith('+') && !line.startsWith('+++')) {
-      const text = line.slice(1);
-      for (const finding of scanText(text, options)) {
-        findings.push({ ...finding, file: currentFile, line: newLine });
+
+    const nextHunk = HUNK_HEADER.exec(line);
+    if (nextHunk) {
+      flushBlock();
+      newLine = Number(nextHunk[1]);
+      continue;
+    }
+    if (line.startsWith('+')) {
+      if (currentFile !== null) {
+        blockLines.push(line.slice(1));
+        blockMap.push(newLine);
       }
       newLine++;
-    } else if (!line.startsWith('-') && !line.startsWith('\\')) {
-      newLine++;
+      continue;
     }
+    if (line.startsWith('-')) continue;
+    if (line.startsWith(' ') || line === '') {
+      flushBlock();
+      newLine++;
+      continue;
+    }
+    if (line.startsWith('\\')) continue;
+
+    flushBlock();
+    inHunk = false;
+    index--;
   }
+  flushBlock();
   return findings;
 }
 __exports.looksBinary = looksBinary;
@@ -859,7 +1158,20 @@ function readBaseline(path) {
   }
   const values = Array.isArray(data) ? data : data && Array.isArray(data.entries) ? data.entries : null;
   if (!values) throw new Error(`invalid baseline format in ${path}`);
-  return new Set(values.map((entry) => typeof entry === 'string' ? entry : entry.key).filter(Boolean));
+  const keys = [];
+  for (const entry of values) {
+    if (typeof entry === 'string') {
+      if (entry) keys.push(entry);
+      continue;
+    }
+    if (entry && typeof entry === 'object' &&
+        Object.prototype.hasOwnProperty.call(entry, 'key') && typeof entry.key === 'string' && entry.key) {
+      keys.push(entry.key);
+      continue;
+    }
+    throw new Error(`invalid baseline entry in ${path}`);
+  }
+  return new Set(keys);
 }
 
 function applyBaseline(findings, keys) {
@@ -887,14 +1199,45 @@ const { VERSION } = __internalRequire('src/util.mjs');
 const SEVERITY_RANK = { low: 0, medium: 1, high: 2, critical: 3 };
 const SARIF_LEVEL = { low: 'warning', medium: 'warning', high: 'error', critical: 'error' };
 
+function safeDisplay(value) {
+  return String(value).replace(/[\x00-\x1f\x7f]/g, (char) => {
+    if (char === '\n') return '\\n';
+    if (char === '\r') return '\\r';
+    if (char === '\t') return '\\t';
+    return `\\x${char.charCodeAt(0).toString(16).padStart(2, '0')}`;
+  });
+}
+
+function sarifArtifactUri(file) {
+  let text = String(file || '').replace(/\\/g, '/');
+  if (!text || text === '<text>') return 'stdin';
+
+  if (/^(?:[A-Za-z]:\/|\/)/.test(text)) {
+    const parts = text.split('/').filter(Boolean);
+    text = parts[parts.length - 1] || 'artifact';
+  } else {
+    const segments = [];
+    for (const segment of text.split('/')) {
+      if (!segment || segment === '.') continue;
+      if (segment === '..') {
+        segments.pop();
+        continue;
+      }
+      segments.push(segment);
+    }
+    text = segments.join('/') || 'artifact';
+  }
+  return text.split('/').map((segment) => encodeURIComponent(segment)).join('/');
+}
+
 function formatText(findings, options = {}) {
   if (findings.length === 0) {
     return options.cleanMessage || 'secretsweep: no secrets found\n';
   }
   const lines = [`secretsweep: ${findings.length} potential secret${findings.length === 1 ? '' : 's'} found`];
   for (const finding of findings) {
-    const where = `${finding.file || '<text>'}:${finding.line}:${finding.column}`;
-    lines.push(`${where} [${finding.severity}] ${finding.provider} (${finding.detector}) ${finding.redacted} sha256:${finding.fingerprint.slice(0, 12)}`);
+    const where = `${safeDisplay(finding.file || '<text>')}:${finding.line}:${finding.column}`;
+    lines.push(`${where} [${safeDisplay(finding.severity)}] ${safeDisplay(finding.provider)} (${safeDisplay(finding.detector)}) ${safeDisplay(finding.redacted)} sha256:${finding.fingerprint.slice(0, 12)}`);
   }
   return lines.join('\n') + '\n';
 }
@@ -929,7 +1272,7 @@ function formatSarif(findings, options = {}) {
       message: { text: `${finding.provider}: potential ${finding.name || 'secret'} (${finding.redacted})` },
       locations: [{
         physicalLocation: {
-          artifactLocation: { uri: (finding.file || '<text>').replace(/\\/g, '/') },
+          artifactLocation: { uri: sarifArtifactUri(finding.file) },
           region: {
             startLine: Math.max(1, finding.line || 1),
             startColumn: Math.max(1, finding.column || 1),

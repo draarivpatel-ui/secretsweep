@@ -49,6 +49,18 @@ describe('scanText', () => {
     const text = `# secretsweep:ignore\n${GITHUB()}`;
     assert.equal(scanText(text).length, 1);
   });
+  test('rule-scoped ignore suppresses the named detector', () => {
+    const text = `${GITHUB()} # secretsweep:ignore github-pat`;
+    assert.equal(scanText(text, { detectors: ['github-pat'] }).length, 0);
+  });
+  test('rule-scoped ignore does not suppress a different detector', () => {
+    const text = `${GITHUB()} # secretsweep:ignore aws-access-key-id`;
+    assert.equal(scanText(text, { detectors: ['github-pat'] }).length, 1);
+  });
+  test('rule-scoped ignore accepts comma separated detector ids', () => {
+    const text = `${GITHUB()} # secretsweep:ignore aws-access-key-id,github-pat`;
+    assert.equal(scanText(text, { detectors: ['github-pat'] }).length, 0);
+  });
   test('placeholder values are ignored by default', () => {
     assert.equal(scanText('api_key = "YOUR_API_KEY"').length, 0);
   });
@@ -86,5 +98,11 @@ describe('scanText', () => {
     const value = GITHUB();
     const finding = scanText(value)[0];
     assert.ok(!finding.redacted.includes(value.slice(4, 16)));
+  });
+  test('a late secret is not hidden behind a flood of duplicate matches', () => {
+    const finalToken = 'ghp_' + 'B'.repeat(36);
+    const input = Array.from({ length: 1000 }, () => GITHUB()).concat([finalToken]).join('\n');
+    const findings = scanText(input, { detectors: ['github-pat'] });
+    assert.ok(findings.some((finding) => finding.redacted.endsWith('BBBB')));
   });
 });

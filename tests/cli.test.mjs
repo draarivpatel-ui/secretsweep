@@ -65,6 +65,12 @@ describe('CLI', () => {
   test('invalid max file bytes exits 2', () => {
     assert.equal(run(['--max-file-bytes', 'abc']).status, 2);
   });
+  test('unknown detector id exits 2', () => {
+    assert.equal(run(['--stdin', '--detectors', 'github-pat,not-a-detector'], GITHUB()).status, 2);
+  });
+  test('empty detector list exits 2', () => {
+    assert.equal(run(['--stdin', '--detectors', ','], GITHUB()).status, 2);
+  });
   test('conflicting input modes exit 2', () => {
     assert.equal(run(['--stdin', '--diff']).status, 2);
   });
@@ -85,6 +91,16 @@ describe('CLI', () => {
     const result = run(['--stdin', '--format', 'sarif'], GITHUB());
     assert.equal(result.status, 1);
     assert.equal(JSON.parse(result.stdout).version, '2.1.0');
+  });
+  test('SARIF directory output uses relative artifact URIs', () => {
+    const dir = tempDir();
+    writeFileSync(join(dir, 'a.js'), GITHUB());
+    const result = run(['--format', 'sarif', dir]);
+    assert.equal(result.status, 1);
+    const sarif = JSON.parse(result.stdout);
+    const uri = sarif.runs[0].results[0].locations[0].physicalLocation.artifactLocation.uri;
+    assert.equal(uri, 'a.js');
+    assert.ok(!result.stdout.includes(dir));
   });
   test('detector filter restricts findings', () => {
     const text = `${GITHUB()}\n${AWS()}`;
@@ -139,6 +155,12 @@ describe('CLI', () => {
     const baseline = join(dir, 'bad.json');
     writeFileSync(baseline, '{}');
     assert.equal(run(['--baseline', baseline, '--stdin'], GITHUB()).status, 2);
+  });
+  test('unwritable baseline output exits 2 without a stack trace', () => {
+    const missingParent = join(tempDir(), 'missing', 'baseline.json');
+    const result = run(['--write-baseline', missingParent, '--stdin'], '');
+    assert.equal(result.status, 2);
+    assert.ok(!result.stderr.includes('node:fs'));
   });
   test('exclude option works', () => {
     const dir = tempDir();

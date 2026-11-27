@@ -39,10 +39,20 @@ describe('maskValue', () => {
   test('12 char value is fully masked', () => {
     assert.equal(maskValue('123456789012'), '************');
   });
-  test('long value keeps first and last four characters', () => {
+  test('13 to 16 char values are fully masked', () => {
+    assert.equal(maskValue('1234567890123'), '*************');
+    assert.equal(maskValue('1234567890123456'), '****************');
+  });
+  test('medium value exposes only two characters at each edge', () => {
     const result = maskValue('ABCDEFGHIJKLMNOPQRST');
+    assert.equal(result.slice(0, 2), 'AB');
+    assert.equal(result.slice(-2), 'ST');
+    assert.equal(result.includes('CDEFGHIJKLMNOPQR'), false);
+  });
+  test('long value keeps first and last four characters', () => {
+    const result = maskValue('ABCDEFGHIJKLMNOPQRSTUVWXYZ012345');
     assert.equal(result.slice(0, 4), 'ABCD');
-    assert.equal(result.slice(-4), 'QRST');
+    assert.equal(result.slice(-4), '2345');
   });
   test('middle mask never exceeds 12 stars', () => {
     assert.ok(maskValue('X'.repeat(100)).length <= 20);
@@ -52,9 +62,17 @@ describe('maskValue', () => {
     assert.notEqual(maskValue(value), value);
   });
   test('does not expose more than 8 original characters', () => {
-    const masked = maskValue('0123456789abcdef');
+    const masked = maskValue('0123456789abcdef0123456789abcdef');
     const revealed = [...masked].filter((c) => c !== '*').length;
     assert.ok(revealed <= 8);
+  });
+  test('never exposes more than one quarter of a longer secret', () => {
+    for (const length of [17, 24, 31, 32, 64]) {
+      const value = Array.from({ length }, (_, i) => String.fromCharCode(65 + (i % 26))).join('');
+      const masked = maskValue(value);
+      const revealed = [...masked].filter((c) => c !== '*').length;
+      assert.ok(revealed <= Math.floor(length / 4), `length ${length} exposes ${revealed}`);
+    }
   });
 });
 

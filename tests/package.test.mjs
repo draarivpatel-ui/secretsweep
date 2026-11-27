@@ -86,6 +86,7 @@ describe('community scaffolding', () => {
     assert.ok(!readme.includes('/Users/'));
   });
   test('tracked files contain no em dashes', () => {
-    assert.ok(!/—/.test(readme));
+    assert.ok(!readme.includes('\u2014'));
+    assert.ok(!readme.includes('\u2013'));
   });
 });

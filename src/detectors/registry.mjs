@@ -16,12 +16,16 @@ export function registerDetector(descriptor) {
   if (typeof descriptor.check !== 'function') {
     throw new Error(`detector ${id} has no check function`);
   }
+  const severity = descriptor.severity || 'high';
+  if (!['low', 'medium', 'high', 'critical'].includes(severity)) {
+    throw new Error(`detector ${id} has invalid severity`);
+  }
   if (descriptor.pattern) ensureLinear(descriptor.pattern, id);
   const entry = Object.freeze({
     id,
     provider: descriptor.provider || id,
     name: descriptor.name || descriptor.provider || id,
-    severity: descriptor.severity || 'high',
+    severity,
     pattern: descriptor.pattern || null,
     check: descriptor.check,
   });
@@ -44,7 +48,7 @@ export function getDetector(id) {
 
 export function createPatternDetector(descriptor) {
   const pattern = ensureLinear(descriptor.pattern, descriptor.id);
-  const flags = descriptor.flags || 'g';
+  const flags = descriptor.flags || pattern.flags || 'g';
   return registerDetector({
     ...descriptor,
     pattern,
@@ -54,9 +58,13 @@ export function createPatternDetector(descriptor) {
       let match;
       while ((match = re.exec(text)) !== null) {
         const value = descriptor.value ? descriptor.value(match) : match[0];
-        if (value) matches.push({ value, index: match.index });
+        if (value) {
+          let index = match.index;
+          const valueOffset = typeof value === 'string' ? match[0].indexOf(value) : -1;
+          if (valueOffset !== -1) index += valueOffset;
+          matches.push({ value, index });
+        }
         if (match[0].length === 0) re.lastIndex++;
-        if (matches.length >= 1000) break;
       }
       return matches;
     },

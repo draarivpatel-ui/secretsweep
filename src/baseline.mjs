@@ -18,7 +18,20 @@ export function readBaseline(path) {
   }
   const values = Array.isArray(data) ? data : data && Array.isArray(data.entries) ? data.entries : null;
   if (!values) throw new Error(`invalid baseline format in ${path}`);
-  return new Set(values.map((entry) => typeof entry === 'string' ? entry : entry.key).filter(Boolean));
+  const keys = [];
+  for (const entry of values) {
+    if (typeof entry === 'string') {
+      if (entry) keys.push(entry);
+      continue;
+    }
+    if (entry && typeof entry === 'object' &&
+        Object.prototype.hasOwnProperty.call(entry, 'key') && typeof entry.key === 'string' && entry.key) {
+      keys.push(entry.key);
+      continue;
+    }
+    throw new Error(`invalid baseline entry in ${path}`);
+  }
+  return new Set(keys);
 }
 
 export function applyBaseline(findings, keys) {

@@ -6,14 +6,45 @@ import { VERSION } from './util.mjs';
 const SEVERITY_RANK = { low: 0, medium: 1, high: 2, critical: 3 };
 const SARIF_LEVEL = { low: 'warning', medium: 'warning', high: 'error', critical: 'error' };
 
+function safeDisplay(value) {
+  return String(value).replace(/[\x00-\x1f\x7f]/g, (char) => {
+    if (char === '\n') return '\\n';
+    if (char === '\r') return '\\r';
+    if (char === '\t') return '\\t';
+    return `\\x${char.charCodeAt(0).toString(16).padStart(2, '0')}`;
+  });
+}
+
+function sarifArtifactUri(file) {
+  let text = String(file || '').replace(/\\/g, '/');
+  if (!text || text === '<text>') return 'stdin';
+
+  if (/^(?:[A-Za-z]:\/|\/)/.test(text)) {
+    const parts = text.split('/').filter(Boolean);
+    text = parts[parts.length - 1] || 'artifact';
+  } else {
+    const segments = [];
+    for (const segment of text.split('/')) {
+      if (!segment || segment === '.') continue;
+      if (segment === '..') {
+        segments.pop();
+        continue;
+      }
+      segments.push(segment);
+    }
+    text = segments.join('/') || 'artifact';
+  }
+  return text.split('/').map((segment) => encodeURIComponent(segment)).join('/');
+}
+
 export function formatText(findings, options = {}) {
   if (findings.length === 0) {
     return options.cleanMessage || 'secretsweep: no secrets found\n';
   }
   const lines = [`secretsweep: ${findings.length} potential secret${findings.length === 1 ? '' : 's'} found`];
   for (const finding of findings) {
-    const where = `${finding.file || '<text>'}:${finding.line}:${finding.column}`;
-    lines.push(`${where} [${finding.severity}] ${finding.provider} (${finding.detector}) ${finding.redacted} sha256:${finding.fingerprint.slice(0, 12)}`);
+    const where = `${safeDisplay(finding.file || '<text>')}:${finding.line}:${finding.column}`;
+    lines.push(`${where} [${safeDisplay(finding.severity)}] ${safeDisplay(finding.provider)} (${safeDisplay(finding.detector)}) ${safeDisplay(finding.redacted)} sha256:${finding.fingerprint.slice(0, 12)}`);
   }
   return lines.join('\n') + '\n';
 }
@@ -48,7 +79,7 @@ export function formatSarif(findings, options = {}) {
       message: { text: `${finding.provider}: potential ${finding.name || 'secret'} (${finding.redacted})` },
       locations: [{
         physicalLocation: {
-          artifactLocation: { uri: (finding.file || '<text>').replace(/\\/g, '/') },
+          artifactLocation: { uri: sarifArtifactUri(finding.file) },
           region: {
             startLine: Math.max(1, finding.line || 1),
             startColumn: Math.max(1, finding.column || 1),

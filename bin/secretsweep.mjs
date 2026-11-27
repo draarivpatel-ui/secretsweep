@@ -90,6 +90,12 @@ export function parseArgs(argv) {
   }
   if (!['text', 'json', 'sarif'].includes(options.format)) fail(`unknown format: ${options.format}`);
   if (!['low', 'medium', 'high', 'critical', null].includes(options.severity)) fail(`unknown severity: ${options.severity}`);
+  if (options.detectors) {
+    if (options.detectors.length === 0) fail('--detectors requires at least one detector id');
+    const known = new Set(listDetectors().map((detector) => detector.id));
+    const unknown = options.detectors.filter((id) => !known.has(id));
+    if (unknown.length) fail(`unknown detector: ${unknown.join(',')}`);
+  }
   if ((options.diff ? 1 : 0) + (options.stdin ? 1 : 0) + (options.paths.length ? 1 : 0) > 1) {
     fail('choose exactly one input mode: paths, --diff or --stdin');
   }
@@ -140,9 +146,13 @@ export function main(argv = process.argv.slice(2)) {
 
   findings = sortFindings(findings);
   if (options.writeBaseline) {
-    const count = writeBaseline(options.writeBaseline, findings);
-    process.stdout.write(`secretsweep: wrote ${count} baseline entries\n`);
-    return EXIT_CLEAN;
+    try {
+      const count = writeBaseline(options.writeBaseline, findings);
+      process.stdout.write(`secretsweep: wrote ${count} baseline entries\n`);
+      return EXIT_CLEAN;
+    } catch (error) {
+      fail(error.message);
+    }
   }
   if (options.baseline) {
     try {

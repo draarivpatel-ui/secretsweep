@@ -11,7 +11,10 @@ export function fingerprint(value) {
 
 export function maskValue(value) {
   const text = String(value);
-  if (text.length <= 12) return '*'.repeat(text.length);
+  if (text.length <= 16) return '*'.repeat(text.length);
+  if (text.length < 32) {
+    return text.slice(0, 2) + '*'.repeat(Math.min(12, text.length - 4)) + text.slice(-2);
+  }
   return text.slice(0, 4) + '*'.repeat(Math.min(12, text.length - 8)) + text.slice(-4);
 }
 
