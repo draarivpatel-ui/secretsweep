@@ -10,7 +10,7 @@ Most secret scanners pull in a dependency tree, print the token they just found 
 
 - No dependencies at all. Install size is the source code.
 - Reports contain a masked preview and a SHA-256 fingerprint only.
-- 34 provider detectors plus high-entropy generic rules.
+- 32 provider detectors plus high-entropy generic rules.
 - Linear-time patterns. A ReDoS lint validates every detector at registration.
 - Deterministic output and exit codes, so diffs of reports are stable.
 
