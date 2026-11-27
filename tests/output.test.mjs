@@ -120,14 +120,14 @@ describe('sarif output', () => {
     assert.equal(result.locations[0].physicalLocation.artifactLocation.uri, 'src/a.js');
   });
   test('absolute host paths are reduced to a safe relative artifact name', () => {
-    const result = parse([finding({ file: '/Users/example/project/src/a.js' })]).runs[0].results[0];
+    const result = parse([finding({ file: '/home/example/project/src/a.js' })]).runs[0].results[0];
     const uri = result.locations[0].physicalLocation.artifactLocation.uri;
     assert.equal(uri, 'a.js');
     assert.ok(!uri.startsWith('/'));
     assert.ok(!uri.includes('Users'));
   });
   test('Windows drive paths are not emitted as absolute URIs', () => {
-    const result = parse([finding({ file: 'C:/Users/example/a.js' })]).runs[0].results[0];
+    const result = parse([finding({ file: 'C:/example/a.js' })]).runs[0].results[0];
     assert.equal(result.locations[0].physicalLocation.artifactLocation.uri, 'a.js');
   });
   test('dot segments cannot escape the artifact base', () => {

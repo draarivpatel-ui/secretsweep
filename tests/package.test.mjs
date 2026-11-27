@@ -43,8 +43,8 @@ describe('package metadata', () => {
     assert.ok(pkg.exports['.'].import);
     assert.ok(pkg.exports['.'].require);
   });
-  test('test script uses node:test', () => {
-    assert.match(pkg.scripts.test, /node --test/);
+  test('test script uses an explicit test file glob', () => {
+    assert.equal(pkg.scripts.test, 'node --test tests/*.test.mjs');
   });
   test('check:cjs script exists', () => {
     assert.match(pkg.scripts['check:cjs'], /--check/);
@@ -59,7 +59,9 @@ describe('package metadata', () => {
 
 describe('community scaffolding', () => {
   const files = ['README.md', 'SECURITY.md', 'CONTRIBUTING.md', 'LICENSE',
-    'docs/good-first-issues.md', '.github/workflows/ci.yml', 'types/index.d.ts'];
+    'docs/good-first-issues.md', '.github/workflows/ci.yml', 'types/index.d.ts',
+    '.gitattributes', '.github/ISSUE_TEMPLATE/bug_report.md',
+    '.github/ISSUE_TEMPLATE/feature_request.md', '.github/PULL_REQUEST_TEMPLATE.md'];
   for (const file of files) {
     test(`${file} exists`, () => {
       assert.ok(existsSync(join(ROOT, file)), `missing ${file}`);
@@ -74,9 +76,18 @@ describe('community scaffolding', () => {
     const matches = text.match(/^###\s+\d+\./gm) || [];
     assert.ok(matches.length >= 20, `found ${matches.length} issues`);
   });
-  test('CI matrix covers Node 18, 20 and 22', () => {
+  test('CI matrix covers Ubuntu and Windows on Node 18 through 24', () => {
     const text = readFileSync(join(ROOT, '.github/workflows/ci.yml'), 'utf8');
-    for (const version of ['18', '20', '22']) assert.match(text, new RegExp(`\\b${version}\\b`));
+    for (const version of ['18', '20', '22', '24']) assert.match(text, new RegExp(`\\b${version}\\b`));
+    for (const required of ['ubuntu-latest', 'windows-latest', 'shell: bash', 'npm_config_script_shell: bash']) {
+      assert.ok(text.includes(required), `CI is missing ${required}`);
+    }
+  });
+  test('gitattributes pins source files to LF line endings', () => {
+    const text = readFileSync(join(ROOT, '.gitattributes'), 'utf8');
+    for (const required of ['*.cjs text eol=lf', '*.mjs text eol=lf', '*.ts text eol=lf']) {
+      assert.ok(text.includes(required), `.gitattributes is missing ${required}`);
+    }
   });
   test('LICENSE is MIT text', () => {
     const text = readFileSync(join(ROOT, 'LICENSE'), 'utf8');

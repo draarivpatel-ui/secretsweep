@@ -2,7 +2,7 @@
 
 A zero-dependency secret and PII scanner for source trees and git diffs. It ships as both a CLI and a library, emits text, JSON or SARIF 2.1.0, supports baseline suppression, and never prints a raw secret value in a report.
 
-**354 tests**. Zero runtime dependencies. Zero dev dependencies. Node.js 18 or newer.
+**359 tests**. Zero runtime dependencies. Zero dev dependencies. Node.js 18 or newer.
 
 ## Why another scanner
 

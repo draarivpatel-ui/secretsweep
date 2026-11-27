@@ -11,12 +11,15 @@ permissions:
 
 jobs:
   test:
-    name: Node ${{ matrix.node }}
-    runs-on: ubuntu-latest
+    name: ${{ matrix.os }} Node ${{ matrix.node }}
+    runs-on: ${{ matrix.os }}
+    env:
+      npm_config_script_shell: bash
     strategy:
       fail-fast: false
       matrix:
-        node: [18, 20, 22]
+        os: [ubuntu-latest, windows-latest]
+        node: [18, 20, 22, 24]
     steps:
       - name: Check out the repository
         uses: actions/checkout@v4
@@ -26,22 +29,23 @@ jobs:
         with:
           node-version: ${{ matrix.node }}
 
-      - name: Install (nothing to install)
-        run: npm install --ignore-scripts
-
       - name: Run the test suite
+        shell: bash
         run: npm test
 
       - name: Verify the CommonJS artifact
-        run: npm run check:cjs
+        shell: bash
+        run: node scripts/build-cjs.mjs --check
 
       - name: CLI smoke test on a clean tree
+        shell: bash
         run: node bin/secretsweep.mjs --version
 
       - name: CLI smoke test with a synthetic token
+        shell: bash
         run: |
           set +e
-          token="ghp_$(printf 'A%.0s' $(seq 1 36))"
+          token="ghp_$(printf 'A%.0s' {1..36})"
           printf 'const token = "%s";\n' "$token" | node bin/secretsweep.mjs --stdin
           status=$?
           set -e

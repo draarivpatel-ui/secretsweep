@@ -34,7 +34,7 @@
     "node": ">=18.0.0"
   },
   "scripts": {
-    "test": "node --test tests/",
+    "test": "node --test tests/*.test.mjs",
     "test:coverage": "node --test --experimental-test-coverage tests/",
     "build:cjs": "node scripts/build-cjs.mjs",
     "check:cjs": "node scripts/build-cjs.mjs --check"
