@@ -4,13 +4,13 @@
 
 A zero-dependency secret and PII scanner for source trees and git diffs. It ships as both a CLI and a library, emits text, JSON or SARIF 2.1.0, supports baseline suppression, and never prints a raw secret value in a report.
 
-**359 tests**. Zero runtime dependencies. Zero dev dependencies. Node.js 18 or newer.
+**359 tests**. Zero runtime dependencies. Node.js 18 or newer.
 
 ## Why another scanner
 
 Most secret scanners pull in a dependency tree, print the token they just found into CI logs, or choke on a large monorepo. secretsweep takes a different approach:
 
-- No dependencies at all. Install size is the source code.
+- No runtime dependencies. Install size is the source code.
 - Reports contain a masked preview and a SHA-256 fingerprint only.
 - 32 provider detectors plus high-entropy generic rules.
 - Linear-time patterns. A ReDoS lint validates every detector at registration.

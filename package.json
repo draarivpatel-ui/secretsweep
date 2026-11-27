@@ -35,12 +35,15 @@
   },
   "scripts": {
     "test": "node --test tests/*.test.mjs",
+    "test:fuzz": "node --test test/fuzz.test.js",
     "test:coverage": "node --test --experimental-test-coverage tests/",
     "build:cjs": "node scripts/build-cjs.mjs",
     "check:cjs": "node scripts/build-cjs.mjs --check"
   },
   "dependencies": {},
-  "devDependencies": {},
+  "devDependencies": {
+    "fast-check": "4.10.3"
+  },
   "keywords": [
     "secrets",
     "secret-scanner",

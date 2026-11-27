@@ -4,16 +4,18 @@ Thanks for helping improve secretsweep. Small, focused pull requests are easiest
 
 ## Setup
 
-Nothing to install:
+Core verification needs no install step. Run `npm ci` once before the fast-check fuzz suite:
 
 ```sh
 git clone <your fork>
 cd secretsweep
 npm test
 npm run check:cjs
+npm ci
+npm run test:fuzz
 ```
 
-Node.js 18 or newer is required. The project has no dependencies, so there is no lockfile to update.
+Node.js 18 or newer is required. The project has no runtime dependencies. Keep `package-lock.json` updated when development-only tooling changes.
 
 ## Ground rules
 

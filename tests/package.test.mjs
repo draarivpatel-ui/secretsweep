@@ -24,8 +24,11 @@ describe('package metadata', () => {
   test('has no runtime dependencies', () => {
     assert.deepEqual(pkg.dependencies, {});
   });
-  test('has no dev dependencies', () => {
-    assert.deepEqual(pkg.devDependencies, {});
+  test('keeps fuzz tooling development-only', () => {
+    assert.ok(Object.keys(pkg.devDependencies || {}).includes('fast-check'));
+    for (const name of Object.keys(pkg.devDependencies || {})) {
+      assert.equal(pkg.dependencies[name], undefined, `${name} must stay development-only`);
+    }
   });
   test('declares a bin entry', () => {
     assert.equal(pkg.bin.secretsweep, 'bin/secretsweep.mjs');
