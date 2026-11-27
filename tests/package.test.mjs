@@ -9,8 +9,8 @@ const pkg = JSON.parse(readFileSync(join(ROOT, 'package.json'), 'utf8'));
 const readme = readFileSync(join(ROOT, 'README.md'), 'utf8');
 
 describe('package metadata', () => {
-  test('package name is secretsweep', () => {
-    assert.equal(pkg.name, 'secretsweep');
+  test('package name is @aarivbuildz/secretsweep', () => {
+    assert.equal(pkg.name, '@aarivbuildz/secretsweep');
   });
   test('version is semver', () => {
     assert.match(pkg.version, /^\d+\.\d+\.\d+$/);
@@ -28,7 +28,7 @@ describe('package metadata', () => {
     assert.deepEqual(pkg.devDependencies, {});
   });
   test('declares a bin entry', () => {
-    assert.equal(pkg.bin.secretsweep, './bin/secretsweep.mjs');
+    assert.equal(pkg.bin.secretsweep, 'bin/secretsweep.mjs');
   });
   test('declares ESM module entry', () => {
     assert.equal(pkg.module, './src/index.mjs');

@@ -17,7 +17,7 @@ Most secret scanners pull in a dependency tree, print the token they just found 
 ## Install
 
 ```sh
-npm install --save-dev secretsweep
+npm install --save-dev @aarivbuildz/secretsweep
 ```
 
 Or run it without installing:
@@ -86,7 +86,7 @@ const token = process.env.API_TOKEN; // secretsweep:ignore github-pat,aws-access
 ## Library usage
 
 ```js
-import { scanText, scanPath, scanDiff, formatSarif } from 'secretsweep';
+import { scanText, scanPath, scanDiff, formatSarif } from '@aarivbuildz/secretsweep';
 
 const findings = scanText('const token = "ghp_..."');
 console.log(findings[0].redacted, findings[0].fingerprint);
@@ -98,7 +98,7 @@ process.stdout.write(formatSarif(inTree));
 CommonJS works too:
 
 ```js
-const { scanText } = require('secretsweep');
+const { scanText } = require('@aarivbuildz/secretsweep');
 ```
 
 ## Detectors

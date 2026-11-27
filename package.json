@@ -1,5 +1,5 @@
 {
-  "name": "secretsweep",
+  "name": "@aarivbuildz/secretsweep",
   "version": "1.0.0",
   "description": "Zero-dependency secret and PII scanner for source trees and git diffs, with SARIF output and baseline suppression.",
   "license": "MIT",
@@ -17,7 +17,7 @@
     "./package.json": "./package.json"
   },
   "bin": {
-    "secretsweep": "./bin/secretsweep.mjs"
+    "secretsweep": "bin/secretsweep.mjs"
   },
   "files": [
     "src",
