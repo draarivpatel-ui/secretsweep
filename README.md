@@ -1,5 +1,7 @@
 # secretsweep
 
+[![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/draarivpatel-ui/secretsweep/badge)](https://scorecard.dev/viewer/?uri=github.com/draarivpatel-ui/secretsweep)
+
 A zero-dependency secret and PII scanner for source trees and git diffs. It ships as both a CLI and a library, emits text, JSON or SARIF 2.1.0, supports baseline suppression, and never prints a raw secret value in a report.
 
 **359 tests**. Zero runtime dependencies. Zero dev dependencies. Node.js 18 or newer.
