@@ -2,15 +2,24 @@
 
 ## Reporting a vulnerability
 
-Please do not open a public issue for a security vulnerability. Use the repository's private vulnerability reporting channel, or contact the maintainers privately through the contact method listed on the repository profile page.
+Do not open a public issue for a suspected vulnerability. [Report a vulnerability privately through GitHub](https://github.com/draarivpatel-ui/secretsweep/security/advisories/new).
 
-Include:
+Please include:
 
-- A description of the issue and the affected version.
-- A minimal reproduction that does not include a live credential.
-- The impact you believe the issue has.
+- A minimal reproduction that uses synthetic input only.
+- The affected project version, commit or action ref, and Node.js version.
+- The expected security boundary and the observed violation.
+- Logs, output, or proof-of-concept code needed to reproduce the finding, with real secrets removed.
 
-You should receive an acknowledgement within seven days. We will work on a fix and coordinate disclosure with you.
+Never include a real token, cookie, password, private key, production log line or real personal data in a report.
+
+Vulnerability handling steps:
+
+1. The maintainer acknowledges the private report within 72 hours.
+2. The maintainer reproduces the finding against the latest supported version and confirms severity within 14 days when enough information is available.
+3. A fix is developed privately, with regression coverage where practical.
+4. The maintainer coordinates the advisory, affected versions, reporter credit and disclosure date with the reporter.
+5. The target coordinated disclosure window is 90 days or less from acknowledgment. If more time is needed, the maintainer and reporter agree on a new date before disclosure.
 
 ## Scope
 
